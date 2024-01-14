@@ -1,0 +1,9 @@
+<component name="libraryTable">
+  <library name="BedWars-Rebuilt">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/../cartelle/Mc server/2 bedwars 2/plugins/BedWars-Rebuilt.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>

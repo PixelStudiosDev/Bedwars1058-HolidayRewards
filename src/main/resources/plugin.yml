@@ -1,0 +1,6 @@
+name: BedWars1058-HolidayRewards
+version: 1.1.0
+author: itz_leoo
+main: me.leoo.bedwars.holidayrewards.Main
+description: BedWars1058 Holiday Rewards Addon
+softdepend: [BedWars1058]

@@ -1,0 +1,416 @@
+package me.leoo.bedwars.holidayrewards.utils;
+
+import com.andrei1058.bedwars.api.arena.IArena;
+import com.andrei1058.bedwars.api.arena.generator.GeneratorType;
+import com.andrei1058.bedwars.api.arena.generator.IGenHolo;
+import com.andrei1058.bedwars.api.arena.generator.IGenerator;
+import com.andrei1058.bedwars.api.arena.team.ITeam;
+import com.andrei1058.bedwars.api.configuration.ConfigPath;
+import com.andrei1058.bedwars.api.language.Language;
+import com.andrei1058.bedwars.api.language.Messages;
+import com.andrei1058.bedwars.api.region.Cuboid;
+import me.leoo.bedwars.holidayrewards.HolidayRewards;
+import me.leoo.utils.bukkit.config.ConfigManager;
+import org.bukkit.Location;
+import org.bukkit.Material;
+import org.bukkit.Sound;
+import org.bukkit.entity.*;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.util.EulerAngle;
+import org.bukkit.util.Vector;
+
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.stream.Collectors;
+
+public class RewardGenerator implements IGenerator {
+
+    private Location location;
+    private int delay = 1;
+    private final int upgradeStage = 1;
+    private int lastSpawn;
+    private int spawnLimit = 0;
+    private int amount = 1;
+    private IArena arena;
+    private ItemStack ore;
+    private int rotate = 0, dropID = 0;
+    private ITeam bwt;
+    private final GeneratorType type;
+    boolean up = true;
+
+    private static final ConfigManager config = HolidayRewards.get().getMainConfig();
+
+    /**
+     * Generator holograms per language <iso, holo></iso,>
+     */
+    private HashMap<String, IGenHolo> armorStands = new HashMap<>();
+
+    private ArmorStand item;
+    public boolean stack = HolidayRewards.get().getBedWars().getConfigs().getGeneratorsConfig().getBoolean(ConfigPath.GENERATOR_STACK_ITEMS);
+
+
+    public RewardGenerator(Location location, IArena arena, ITeam bwt, GeneratorType type) {
+        this.location = location.add(0, 1.3, 0);
+        this.arena = arena;
+        this.bwt = bwt;
+        this.type = type;
+        loadDefaults();
+
+        Cuboid c = new Cuboid(location, 1, true);
+        c.setMaxY(c.getMaxY() + 5);
+        c.setMinY(c.getMinY() - 2);
+        arena.getRegionsList().add(c);
+    }
+
+    @Override
+    public void upgrade() {
+
+    }
+
+    @Override
+    public void spawn() {
+        if (lastSpawn == 0) {
+            lastSpawn = delay;
+
+            if (spawnLimit != 0) {
+                int oreCount = 0;
+
+                for (Entity e : location.getWorld().getNearbyEntities(location, 3, 3, 3)) {
+                    if (e.getType() == EntityType.DROPPED_ITEM) {
+                        Item i = (Item) e;
+                        if (i.getItemStack().getType() == ore.getType()) {
+                            oreCount++;
+                        }
+                        if (oreCount >= spawnLimit) return;
+                    }
+                }
+                lastSpawn = delay;
+            }
+            if (bwt == null) {
+                dropItem(location);
+                return;
+            }
+            if (bwt.getMembers().size() == 1) {
+                dropItem(location);
+                return;
+            }
+            if (HolidayRewards.get().getBedWars().getConfigs().getMainConfig().getBoolean(ConfigPath.GENERAL_CONFIGURATION_ENABLE_GEN_SPLIT)) {
+                List<Player> players = location.getWorld().getNearbyEntities(location, 1, 1, 1).stream()
+                        .filter(entity -> entity.getType() == EntityType.PLAYER)
+                        .filter(entity -> arena.isPlayer((Player) entity))
+                        .map(entity -> (Player) entity)
+                        .collect(Collectors.toList());
+
+                if (players.size() <= 1) {
+                    dropItem(location);
+                    return;
+                }
+
+                for (Player player : players) {
+                    ItemStack item = ore.clone();
+                    item.setAmount(amount);
+                    player.playSound(player.getLocation(), Sound.valueOf(HolidayRewards.get().getBedWars().getForCurrentVersion("ITEM_PICKUP", "ENTITY_ITEM_PICKUP", "ENTITY_ITEM_PICKUP")), 0.6f, 1.3f);
+                    Collection<ItemStack> excess = player.getInventory().addItem(item).values();
+                    for (ItemStack value : excess) {
+                        dropItem(player.getLocation(), value.getAmount());
+                    }
+                }
+
+                return;
+            } else {
+                dropItem(location);
+                return;
+            }
+        }
+        lastSpawn--;
+        for (IGenHolo genHolo : armorStands.values()) {
+            genHolo.setTimerName(Language.getLang(genHolo.getIso()).m(Messages.GENERATOR_HOLOGRAM_TIMER).replace("{seconds}", String.valueOf(lastSpawn)));
+        }
+    }
+
+    private void dropItem(Location location, int amount) {
+        for (int temp = amount; temp > 0; temp--) {
+            ItemStack itemStack = new ItemStack(ore);
+            if (!stack) {
+                ItemMeta itemMeta = itemStack.getItemMeta();
+                itemMeta.setDisplayName("custom" + dropID++);
+                itemStack.setItemMeta(itemMeta);
+            }
+            Item item = location.getWorld().dropItem(location, itemStack);
+            item.setVelocity(new Vector(0, 0, 0));
+        }
+    }
+
+    /**
+     * Drop item stack with ID
+     */
+    @Override
+    public void dropItem(Location location) {
+        dropItem(location, amount);
+    }
+
+    @Override
+    public void setOre(ItemStack ore) {
+        this.ore = ore;
+    }
+
+    /**
+     * Get the arena assigned to this generator.
+     */
+    public IArena getArena() {
+        return arena;
+    }
+
+    @Override
+    public HashMap<String, IGenHolo> getLanguageHolograms() {
+        return armorStands;
+    }
+
+    @SuppressWarnings("WeakerAccess")
+    public class HoloGram implements IGenHolo {
+        String iso;
+        ArmorStand tier, timer, name;
+
+        public HoloGram(String iso) {
+            this.iso = iso;
+            this.tier = createArmorStand(Language.getLang(iso).m(Messages.GENERATOR_HOLOGRAM_TIER)
+                    .replace("{tier}", Language.getLang(iso).m(Messages.FORMATTING_GENERATOR_TIER1)), location.clone().add(0, 3, 0));
+            this.timer = createArmorStand(Language.getLang(iso).m(Messages.GENERATOR_HOLOGRAM_TIMER)
+                    .replace("{seconds}", String.valueOf(lastSpawn)), location.clone().add(0, 2.4, 0));
+            this.name = createArmorStand(Language.getLang(iso).m(getOre().getType() == Material.DIAMOND ? Messages.GENERATOR_HOLOGRAM_TYPE_DIAMOND
+                    : Messages.GENERATOR_HOLOGRAM_TYPE_EMERALD), location.clone().add(0, 2.7, 0));
+
+        }
+
+        @Override
+        public void updateForAll() {
+            for (Player p2 : timer.getWorld().getPlayers()) {
+                if (Language.getPlayerLanguage(p2).getIso().equalsIgnoreCase(iso)) continue;
+                HolidayRewards.get().getBedWars().getVersionSupport().hideEntity(tier, p2);
+                HolidayRewards.get().getBedWars().getVersionSupport().hideEntity(timer, p2);
+                HolidayRewards.get().getBedWars().getVersionSupport().hideEntity(name, p2);
+            }
+        }
+
+        @Override
+        public void updateForPlayer(Player p, String lang) {
+            if (lang.equalsIgnoreCase(iso)) return;
+            HolidayRewards.get().getBedWars().getVersionSupport().hideEntity(tier, p);
+            HolidayRewards.get().getBedWars().getVersionSupport().hideEntity(timer, p);
+            HolidayRewards.get().getBedWars().getVersionSupport().hideEntity(name, p);
+        }
+
+        @Override
+        public void setTierName(String name) {
+            if (tier.isDead()) return;
+            tier.setCustomName(name);
+        }
+
+        @Override
+        public String getIso() {
+            return iso;
+        }
+
+        @Override
+        public void setTimerName(String name) {
+            if (timer.isDead()) return;
+            timer.setCustomName(name);
+        }
+
+        @Override
+        public void destroy() {
+            tier.remove();
+            timer.remove();
+            name.remove();
+        }
+    }
+
+    private static ArmorStand createArmorStand(String name, Location l) {
+        ArmorStand stand = (ArmorStand) l.getWorld().spawnEntity(l, EntityType.ARMOR_STAND);
+        stand.setGravity(false);
+        if (name != null) {
+            stand.setCustomName(name);
+            stand.setCustomNameVisible(true);
+        }
+        stand.setRemoveWhenFarAway(false);
+        stand.setVisible(false);
+        stand.setCanPickupItems(false);
+        stand.setArms(false);
+        stand.setBasePlate(false);
+        stand.setMarker(true);
+        return stand;
+    }
+
+    @Override
+    public void rotate() {
+        if (up) {
+            if (rotate >= 540) {
+                up = false;
+            }
+            if (rotate > 500) {
+                item.setHeadPose(new EulerAngle(0, Math.toRadians(rotate += 1), 0));
+            } else if (rotate > 470) {
+                item.setHeadPose(new EulerAngle(0, Math.toRadians(rotate += 2), 0));
+                /*item.teleport(item.getLocation().add(0, 0.005D, 0));*/
+            } else if (rotate > 450) {
+                item.setHeadPose(new EulerAngle(0, Math.toRadians(rotate += 3), 0));
+                /*item.teleport(item.getLocation().add(0, 0.001D, 0));*/
+            } else {
+                item.setHeadPose(new EulerAngle(0, Math.toRadians(rotate += 4), 0));
+                /*item.teleport(item.getLocation().add(0, 0.002D, 0));*/
+            }
+        } else {
+            if (rotate <= 0) {
+                up = true;
+            }
+            if (rotate > 120) {
+                item.setHeadPose(new EulerAngle(0, Math.toRadians(rotate -= 4), 0));
+                /*item.teleport(item.getLocation().subtract(0, 0.002D, 0));*/
+            } else if (rotate > 90) {
+                item.setHeadPose(new EulerAngle(0, Math.toRadians(rotate -= 3), 0));
+                /*item.teleport(item.getLocation().add(0, 0.001D, 0));*/
+            } else if (rotate > 70) {
+                item.setHeadPose(new EulerAngle(0, Math.toRadians(rotate -= 2), 0));
+                /*item.teleport(item.getLocation().add(0, 0.005D, 0));*/
+            } else {
+                item.setHeadPose(new EulerAngle(0, Math.toRadians(rotate -= 1), 0));
+            }
+        }
+    }
+
+    @Override
+    public void setDelay(int delay) {
+        this.delay = delay;
+    }
+
+    @Override
+    public void setAmount(int amount) {
+        this.amount = amount;
+    }
+
+    @Override
+    public Location getLocation() {
+        return location;
+    }
+
+    @Override
+    public ItemStack getOre() {
+        return ore;
+    }
+
+    @Override
+    public void disable() {
+        if (getOre().getType() == Material.EMERALD || getOre().getType() == Material.DIAMOND) {
+            for (IGenHolo a : armorStands.values()) {
+                a.destroy();
+            }
+        }
+        armorStands.clear();
+    }
+
+    @Override
+    public void updateHolograms(Player p, String iso) {
+        for (IGenHolo h : armorStands.values()) {
+            h.updateForPlayer(p, iso);
+        }
+    }
+
+    @Override
+    public void enableRotation() {
+        //no
+    }
+
+    @Override
+    public void setSpawnLimit(int value) {
+        this.spawnLimit = value;
+    }
+
+    private void loadDefaults() {
+        for (Reward reward : RewardsUtil.getRewardList()) {
+            for (String sre : reward.getGenerationType()) {
+                if (sre.contains("GENERATOR_COLLECT")) {
+                    if (type.equals(GeneratorType.DIAMOND)) {
+                        delay = HolidayRewards.get().getBedWars().getConfigs().getGeneratorsConfig().getInt(HolidayRewards.get().getBedWars().getConfigs().getGeneratorsConfig().getYml().get(arena.getGroup() + "." + ConfigPath.GENERATOR_DIAMOND_TIER_I_DELAY) == null ?
+                                "Default." + ConfigPath.GENERATOR_DIAMOND_TIER_I_DELAY : arena.getGroup() + "." + ConfigPath.GENERATOR_DIAMOND_TIER_I_DELAY);
+                    } else if (type.equals(GeneratorType.EMERALD)) {
+                        delay = HolidayRewards.get().getBedWars().getConfigs().getGeneratorsConfig().getInt(HolidayRewards.get().getBedWars().getConfigs().getGeneratorsConfig().getYml().get(arena.getGroup() + "." + ConfigPath.GENERATOR_EMERALD_TIER_I_DELAY) == null ?
+                                "Default." + ConfigPath.GENERATOR_EMERALD_TIER_I_DELAY : arena.getGroup() + "." + ConfigPath.GENERATOR_EMERALD_TIER_I_DELAY);
+                    } else {
+                        delay = 10;
+                    }
+                    ore = reward.getItem();
+                    amount = HolidayRewards.get().getConfig().getInt("holiday_rewards.reward." + reward.getName() + ".generation_amount");
+                    spawnLimit = 5;
+                }
+            }
+        }
+        lastSpawn = delay;
+    }
+
+    @Override
+    public ITeam getBwt() {
+        return bwt;
+    }
+
+    @Override
+    public ArmorStand getHologramHolder() {
+        return item;
+    }
+
+    @Override
+    public GeneratorType getType() {
+        return null;
+    }
+
+    @Override
+    public int getAmount() {
+        return amount;
+    }
+
+    @Override
+    public int getDelay() {
+        return delay;
+    }
+
+    @Override
+    public int getNextSpawn() {
+        return lastSpawn;
+    }
+
+    @Override
+    public int getSpawnLimit() {
+        return spawnLimit;
+    }
+
+    @Override
+    public void setNextSpawn(int nextSpawn) {
+        this.lastSpawn = nextSpawn;
+    }
+
+    @Override
+    public void setStack(boolean stack) {
+        this.stack = stack;
+    }
+
+    @Override
+    public boolean isStack() {
+        return stack;
+    }
+
+    @Override
+    public void setType(GeneratorType generatorType) {
+        //
+    }
+
+    public void destroyData() {
+        location = null;
+        arena = null;
+        ore = null;
+        bwt = null;
+        armorStands = null;
+        item = null;
+    }
+
+}
